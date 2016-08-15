@@ -1,0 +1,97 @@
+---
+title: "Look at the BABS data"
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+We're going to take a look at the bay area bike share data. We have two years worth of data
+
+## Dplyr and tidyr
+
+Load the _dplyr_ and _tidyr_ packages which will help us wrangle the data:
+
+```{r}
+library("dplyr")
+library("tidyr")
+```
+## Loading up the data
+
+Load the various files for year 1 part 1 (29/8/13 - 28/2/14) and year 1 part 2 (3/1/14 - 8/31/14) into R:
+
+```{r}
+station_data_original_year1_part1 <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201402_station_data.csv")
+status_data_original_year1_part1  <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201402_status_data.csv")
+trip_data_original_year1_part1    <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201402_trip_data.csv")
+weather_data_original_year1_part1 <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201402_weather_data.csv")
+
+station_data_original_year1_part2 <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201408_station_data.csv")
+status_data_original_year1_part2  <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201408_status_data.csv")
+trip_data_original_year1_part2    <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201408_trip_data.csv")
+weather_data_original_year1_part2 <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201408_weather_data.csv")
+
+station_data_original_year2       <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201508_station_data.csv")
+status_data_original_year2        <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201508_status_data.csv")
+trip_data_original_year2          <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201508_trip_data.csv")
+weather_data_original_year2       <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201508_weather_data.csv")
+```
+
+Convert them to data frames:
+
+
+```{r}
+station_data_frame_year1_part1 <- data.frame(station_data_original_year1_part1)
+status_data_frame_year1_part1  <- data.frame(status_data_original_year1_part1)
+trip_data_frame_year1_part1    <- data.frame(trip_data_original_year1_part1)
+weather_data_frame_year1_part1 <- data.frame(weather_data_original_year1_part1)
+
+station_data_frame_year1_part2 <- data.frame(station_data_original_year1_part2)
+status_data_frame_year1_part2  <- data.frame(status_data_original_year1_part2)
+trip_data_frame_year1_part2    <- data.frame(trip_data_original_year1_part2)
+weather_data_frame_year1_part2 <- data.frame(weather_data_original_year1_part2)
+
+station_data_frame_year2       <- data.frame(station_data_original_year2)
+status_data_frame_year2        <- data.frame(status_data_original_year2)
+trip_data_frame_year2          <- data.frame(trip_data_original_year2)
+weather_data_frame_year2       <- data.frame(weather_data_original_year2)
+
+```
+
+Convert them all to tables within the dplyr package...
+
+```{r}
+station_data_table_year1_part1 <- dplyr::tbl_df(station_data_original_year1_part1)
+status_data_table_year1_part1  <- dplyr::tbl_df(status_data_original_year1_part1)
+trip_data_table_year1_part1    <- dplyr::tbl_df(trip_data_original_year1_part1)
+weather_data_table_year1_part1 <- dplyr::tbl_df(weather_data_original_year1_part1)
+
+station_data_table_year1_part2 <- dplyr::tbl_df(station_data_original_year1_part2)
+status_data_table_year1_part2  <- dplyr::tbl_df(status_data_original_year1_part2)
+trip_data_table_year1_part2    <- dplyr::tbl_df(trip_data_original_year1_part2)
+weather_data_table_year1_part2 <- dplyr::tbl_df(weather_data_original_year1_part2)
+
+station_data_table_year2 <- dplyr::tbl_df(station_data_original_year2)
+status_data_table_year2  <- dplyr::tbl_df(status_data_original_year2)
+trip_data_table_year2    <- dplyr::tbl_df(trip_data_original_year2)
+weather_data_table_year2 <- dplyr::tbl_df(weather_data_original_year2)
+```
+
+Take a quick look at them:
+```{r, echo = FALSE}
+glimpse(station_data_table_year1_part1)
+glimpse(status_data_table_year1_part1)
+glimpse(trip_data_table_year1_part1)
+glimpse(weather_data_table_year1_part1)
+glimpse(station_data_table_year1_part2)
+glimpse(status_data_table_year1_part2)
+glimpse(trip_data_table_year1_part2)
+glimpse(weather_data_table_year1_part2)
+glimpse(station_data_table_year2)
+glimpse(status_data_table_year2)
+glimpse(trip_data_table_year2)
+glimpse(weather_data_table_year2)
+```
+
