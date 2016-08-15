@@ -20,7 +20,7 @@ library("tidyr")
 ```
 ## Loading up the data
 
-Load the various files for year 1 part 1 (29/8/13 - 28/2/14) and year 1 part 2 (3/1/14 - 8/31/14) into R:
+Load the various files for year 1 part 1 (29/8/13 - 28/2/14) and year 1 part 2 (3/1/14 - 8/31/14) and year 2 (1/9/14 - 31-8/15) into R:
 
 ```{r}
 station_data_original_year1_part1 <- read.csv("C:/Users/Georgie/Desktop/BABS_Data/201402_station_data.csv")
