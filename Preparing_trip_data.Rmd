@@ -1,0 +1,89 @@
+---
+title: "Preparing the trip data"
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+We'll now combine our data file on station data with the station information
+
+## Dplyr and tidyr
+
+Load the _dplyr_ and _tidyr_ packages which will help us wrangle the data:
+
+```{r}
+library("dplyr")
+library("tidyr")
+```
+## Loading up the data
+
+Load up our status data and station information:
+
+```{r}
+trip_read  <- read.csv("201508_trip_data.csv")
+trip_df    <- data.frame(trip_read)
+trip       <- dplyr::tbl_df(trip_df)
+glimpse(trip)
+```
+
+We note the following:
+
+_-Trip ID: numeric ID of bike trip_
+_-Duration: time of trip in seconds_
+_-Start Date: start date of trip with date and time, in PST_
+_-Start Station: station name of start station_
+_-Start Terminal: numeric reference for start station_
+_-End Date: end date of trip with date and time, in PST_
+_-End Station: station name for end station_
+_-End Terminal: numeric reference for end station_
+_-Bike #: ID of bike used_
+_-Subscription Type: Subscriber = annual or 30-day member; Customer = 24-hour or 3-day member_
+_-Zip Code: Home zip code of subscriber (customers can choose to manually enter zip at kiosk however data is unreliable)_
+
+Combine with the station location data and create a date column
+
+
+```{r}
+station_read  <- read.csv("station.csv")
+station_df    <- data.frame(station_read)
+station       <- dplyr::tbl_df(station_df)
+station_short <-select(station, station_id, lat, long, landmark)
+
+trip <- trip %>% 
+  mutate(Date = as.Date(trip$Start.Date[1], format = "%m/%d/%Y")) %>% 
+  left_join(station_short, by = c("Start.Terminal" = "station_id")) %>% 
+  mutate(start_lat =lat, start_long = long) %>% 
+  select(-lat, -long) 
+
+station_short <-select(station, station_id, lat, long)
+
+trip <- trip %>%
+  left_join(station_short, by = c("End.Terminal" = "station_id")) %>% 
+  mutate(end_lat =lat, end_long = long) %>% 
+  select(-lat, -long)
+
+glimpse(trip)
+```
+
+Note we have only added the landmark once. We presume that start and end landamrks are the same. 
+
+```{r}
+weather_read  <- read.csv("weather.csv")
+weather_df    <- data.frame(weather_read)
+weather       <- dplyr::tbl_df(weather_df)
+weather <- weather %>% 
+  select(-X) %>% 
+  mutate(Date = as.Date(trip$Start.Date[1], format = "%m/%d/%Y"))
+glimpse(weather)
+
+semi_join(trip, weather, by="Date")
+
+glimpse(trip)
+
+write.csv(trip, file="trip_full.csv")
+
+```
+

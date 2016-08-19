@@ -1,0 +1,62 @@
+---
+title: "Filter the station data"
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+The first problem to deal with is that the "status data" file is quite big. It contains a row of data for every minute. We will trim this data by selecting only the rows where there is a _change_ in the data. That is a bike is added, taken away or the number of docks changes.
+
+## Dplyr and tidyr
+
+Load the _dplyr_ and _tidyr_ packages which will help us wrangle the data:
+
+```{r}
+library("dplyr")
+library("tidyr")
+```
+## Loading up the data
+
+Load the file for  (1/9/14 - 31-8/15) into R:
+
+```{r}
+status_data_original <- 
+  read.csv("C:/Users/Georgie/Desktop/BABS_Data/201508_status_data.csv")
+status_data_frame <- data.frame(status_data_original)
+status <- dplyr::tbl_df(status_data_frame)
+
+```
+
+
+The following will use the _lag_ function to define a new column which checks if there has been a change or not and store this as a truth variable. We'll then filter using this column. We firstly create the new columns:
+
+```{r}
+status  <- 
+  mutate(status, 
+         ch = (station_id == lag(station_id,1) &
+               bikes_available == lag(bikes_available,1) &
+               docks_available == lag(docks_available,1)))
+
+```
+Note that the first entry will be equal to NA so we change this to FALSE.
+
+```{r}
+status$ch[1] = FALSE
+```
+Then we filter
+
+```{r}
+status <- status %>% filter(ch == FALSE) %>% select(-ch)
+```
+
+Now we take a look and save the file for future use
+
+```{r, echo = FALSE}
+glimpse(status)
+write.csv(status, file="status.csv")
+```
+
+We've gone from nearly 37 million observations to just over 1.1 million without losing any information.

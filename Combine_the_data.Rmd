@@ -1,0 +1,93 @@
+---
+title: "Combining the  data"
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+We'll now combine our data file on station data with the station information
+
+## Dplyr and tidyr
+
+Load the _dplyr_ and _tidyr_ packages which will help us wrangle the data:
+
+```{r}
+library("dplyr")
+library("tidyr")
+```
+## Loading up the data
+
+Load up our status data and station information:
+
+```{r}
+status_read  <- read.csv("status.csv")
+station_read <- read.csv("station.csv")
+weather_read <- read.csv("weather.csv")
+
+status_df    <- data.frame(status_read)
+station_df   <- data.frame(station_read)
+weather_df   <- data.frame(weather_read)
+
+status       <- dplyr::tbl_df(status_df)
+station      <- dplyr::tbl_df(station_df)
+weather      <- dplyr::tbl_df(weather_df)
+
+status       <- select(status, -X)
+station      <- select(station, -X)
+weather      <- select(weather, -X)
+
+status <- left_join(status, station)
+
+glimpse(status)
+```
+
+The dock count column is now redundant
+
+```{r}
+status <- status %>%
+  select(-dockcount) %>%
+  mutate(installation = as.Date(installation))
+glimpse(status)
+```
+
+Take a look at some random rows:
+
+```{r]}
+randomRows = sample(1:length(status$time), 10, replace=T)
+slice(status, randomRows)
+```
+
+we'll now create a Date column and convert the landmark to character
+
+```{r}
+
+status <- status %>%
+  mutate(Date = as.Date(time)) %>%
+  mutate(landmark = as.character(landmark))
+
+weather <- mutate(weather, Date = as.Date(Date))
+```
+
+We're now ready to add the weather data
+
+```{r}
+
+status <- left_join(status, weather)
+write.csv(status, file="status_full.csv")
+
+```
+
+Let's make a quick visual
+```{r}
+library(ggplot2)
+library(lubridate)
+status <- mutate(status, time = ymd_hms(time))
+ggplot(status, aes(x= time, y = bikes_available, 
+                   col = as.factor(station_id)))+
+                                   geom_smooth()
+```
+
+

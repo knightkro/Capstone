@@ -1,0 +1,73 @@
+---
+title: "Preparing the weather data"
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+We'll now prepare the weather data to be combined with the status data
+
+## Dplyr and tidyr
+
+Load the _dplyr_ and _tidyr_ packages which will help us wrangle the data:
+
+```{r}
+library("dplyr")
+library("tidyr")
+```
+
+## Loading up the data
+
+Load up our weather data and station information:
+
+```{r}
+weather_data <- read.csv("201508_weather_data.csv")
+weather_df   <- data.frame(weather_data)
+weather      <- dplyr::tbl_df(weather_df)
+glimpse(weather)
+```
+
+We note the following information
+
+
+_Daily weather information per service area, provided from Weather Underground in PST. Weather is listed from north to south (San Francisco, Redwood City, Palo Alto, Mountain View, San Jose)._
+_-Precipitation In 	"numeric, in form x.xx but alpha ""T""= trace when amount less than .01 inch"_
+_-Cloud Cover 	"scale of 0-8, 0=clear"_	
+_-Zip: 94107=San Francisco, 94063=Redwood City, 94301=Palo Alto, 94041=Mountain View, 95113= San Jose"_
+_-No data recorded on 8/8/2015 for 94301_
+
+
+```{r}
+weather <- mutate(weather, 
+           landmark = ifelse(Zip == 94107, 'San Francisco',
+                      ifelse(Zip == 94063, 'Redwood City',
+                      ifelse(Zip == 94301, 'Palo Alto',      
+                      ifelse(Zip == 94041, 'Mountain View',
+                      ifelse(Zip == 95113, 'San Jose',NA       
+                             )))))
+                 )
+```
+
+Take a look at some random rows:
+
+```{r]}
+randomRows = sample(1:length(weather$PDT), 10, replace=T)
+v <- slice(weather, randomRows)
+select(v, PDT, Zip, landmark)
+```
+
+Create a Date column
+```{r}
+weather <- weather %>% 
+  mutate(Date = as.Date(PDT, format ="%m/%d/%Y")) %>% 
+  select(-PDT)
+```
+
+We'll now be able to add the weather data to the status data using the landmark and Date column.
+
+```{r}
+write.csv(weather, file="weather.csv")
+```
