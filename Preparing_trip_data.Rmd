@@ -79,7 +79,7 @@ weather <- weather %>%
   mutate(Date = as.Date(trip$Start.Date[1], format = "%m/%d/%Y"))
 glimpse(weather)
 
-semi_join(trip, weather, by="Date")
+trip <-semi_join(trip, weather, by="Date")
 
 glimpse(trip)
 
