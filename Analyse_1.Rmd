@@ -1,0 +1,168 @@
+---
+title: "Analysing the BABS data"
+author: "Georgie Knight"
+date: 20/08/2016
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Dplyr and tidyr
+Load the packages and the data. We'll now use the _readr_ package so that we don't have to convert the dates and times.
+```{r}
+library("dplyr")
+library("tidyr")
+library("lubridate")
+library("readr")
+library("ggplot2")
+library("ggmap")
+trip_read    <- read_csv("trip_full_updated.csv")
+status_read  <- read_csv("status_full_updated.csv")
+trip         <- dplyr::tbl_df(trip_read)
+status       <- dplyr::tbl_df(status_read)
+
+glimpse(trip)
+glimpse(status)
+```
+
+
+So now we have our data ready we can play with it.
+
+```{r}
+trip %>% select(Duration) %>% summary()
+```
+
+We see that the average trip length is $1046/60 = 17.4$ minutes, the minimum trip length was $1$ minute and the max was nearly $200$ days. That may be a mistake...
+Does this vary by location?
+
+
+```{r}
+distinct(trip, landmark)
+
+trip %>% filter(landmark == "San Francisco") %>% 
+        select(Duration) %>% 
+        summary()
+trip %>% filter(landmark == "Mountain View") %>% 
+        select(Duration) %>% 
+        summary()
+
+trip %>% filter(landmark == "San Jose") %>% 
+        select(Duration) %>% 
+        summary()
+
+trip %>% filter(landmark == "Palo Alto") %>% 
+        select(Duration) %>% 
+        summary()
+
+trip %>% filter(landmark == "Redwood City") %>% 
+        select(Duration) %>% 
+        summary()
+```
+
+
+We can find the most used starting points
+```{r}
+Count_starting_point <- trip %>% 
+  count(Start.Terminal) %>%  
+  arrange(desc(n))
+
+Terminal_landmark <- trip %>% 
+  select(Start.Terminal, landmark,  start_lat, start_long) %>% 
+  distinct( Start.Terminal, .keep_all = TRUE)
+
+Count_starting_point <-
+left_join(Count_starting_point , Terminal_landmark, by= c("Start.Terminal"= "Start.Terminal"))
+
+ggplot(Count_starting_point, aes(x = reorder(Start.Terminal, -n), y = n,  
+                                 col = as.factor(landmark))) + 
+  geom_point()+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(col='Area', x = "Start point", y = "Times used") 
+
+San_Fran_map <-qmap(
+  location = 'san francisco financial district', 
+  source = "osm", 
+  zoom =14)
+
+San_Fran_map + 
+  geom_point(data =Count_starting_point, aes( y= start_lat, x =start_long, size = n), alpha = 0.5)+
+  labs(size = 'Usage')
+```
+
+```{r}
+San_Fran_trips <-trip %>% 
+  filter(landmark == "San Francisco") %>%
+  select(Start.Station, End.Station, start_lat, start_long,end_lat, end_long) %>% 
+  count(Start.Station, End.Station,start_lat, start_long, end_lat, end_long)
+  
+San_Fran_map <-qmap(location = 'san francisco financial district', zoom =14)
+
+San_Fran_map + 
+  geom_segment(data = San_Fran_trips, aes(y= start_lat, x = start_long, yend =  end_lat, xend = end_long, size = n), alpha = 0.1)+ 
+  theme(legend.position="none")
+  
+```
+
+Let's look at all the trips in a given week
+
+```{r}
+San_Fran_trip_select <-trip %>% 
+  filter(landmark == "San Francisco") %>%
+  filter(between(Date, as.Date("2015-06-01"), as.Date("2015-06-30"))) %>% 
+  select(Start.Station, End.Station, start_lat, start_long,end_lat, end_long) %>% 
+  count(Start.Station, End.Station,start_lat, start_long, end_lat, end_long)
+
+
+San_Fran_map + 
+  geom_segment(data = San_Fran_trip_select, aes(y= start_lat, x = start_long, yend =  end_lat, xend = end_long, size = n), alpha = 0.1)+ 
+  theme(legend.position="none")
+```
+
+Or on a particular day
+
+```{r}
+San_Fran_trip_select <-trip %>% 
+  filter(landmark == "San Francisco") %>%
+  filter(Date == as.Date("2015-06-02")) %>% 
+  select(Start.Station, End.Station, start_lat, start_long,end_lat, end_long) %>% 
+  count(Start.Station, End.Station,start_lat, start_long, end_lat, end_long)
+
+San_Fran_map + 
+  geom_segment(data = San_Fran_trip_select, aes(y= start_lat, x = start_long, yend =  end_lat, xend = end_long, size = n), alpha = 0.1)+ 
+  theme(legend.position="none")
+
+```
+
+
+
+Let's take a look at how bikes available varies in some select stations in San Francisco in a particular week.
+
+```{r}
+status_sf_select <- status %>% 
+  filter(landmark == "San Francisco") %>% 
+  filter(between(station_id, 50, 60)) %>% 
+  filter(between(Date, as.Date("2015-06-01"), as.Date("2015-06-08")))
+  
+ggplot(status_sf_select, aes(x= time, y = bikes_available, 
+                   col = as.factor(station_id)))+ 
+  geom_line()+
+  geom_smooth()+
+  labs(col = 'station id', x = 'time', y = ' number of bikes available' )
+```
+
+
+Or on a particular day
+
+```{r}
+status_sf_select <- status %>% 
+  filter(landmark == "San Francisco") %>% 
+  filter(between(station_id, 50, 60)) %>% 
+  filter(Date == as.Date("2015-06-01"))
+  
+ggplot(status_sf_select, aes(x= time, y = bikes_available, 
+                   col = as.factor(station_id)))+ 
+  geom_line()+
+  geom_point()+
+  labs(col = 'station id', x = 'time', y = ' number of bikes available' )
+```
