@@ -1,0 +1,320 @@
+---
+title: "BABS initial report"
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library("dplyr")
+library("tidyr")
+library("lubridate")
+library("readr")
+library("ggplot2")
+library("ggmap")
+trip_read    <- read_csv("trip_full_updated.csv")
+status_read  <- read_csv("status_full_updated.csv")
+trip         <- dplyr::tbl_df(trip_read)
+status       <- dplyr::tbl_df(status_read)
+```
+
+### Introduction
+
+We are analysing the Bay area bike share usage data. This is available here:
+
+http://www.bayareabikeshare.com/open-data
+
+The Bay area bike share is an easy to use bike rental scheme set up in the Bay area. It contains $70$ stations distributed across $5$ cities : San Francisco, Mountain View, Redwood City, Palo Alto, and San Jose. The data set contains information about: 
+
+_Bike number_
+_Trip start day and time_
+_Trip end day and time_
+_Trip start station_
+_Trip end station_
+_Rider type - Annual or Casual (24-hour or 3-day member)_
+_If an annual member trip, it will also include the member's home zip code_
+_The data set also includes:_
+_Weather information per day per service area_
+_Bike and dock availability per minute per station_
+
+The task is to use this data to understand how the system is currently being used, how it can be improved and anything else we can find with a view to a proposed expansion of the system.
+
+
+### The data
+
+We are using the year 2 data which ranges from September 2014 - August 2015. This contains four separate .csv files. Station data contains the information about the individual docking stations like location, trip data contains information about every trip taken, status gives a minute by minute account of the status of each docking station and weather data contains the daily weather reports.
+
+### Preparing the data
+
+Firstly we needed to either compress the status data or put it into a more manageable form as it contains 37 million observations. We decided to compress it as a lot of the observations are redundant. We selected only the observations where there is a change in the status. This gave us just over 1 million observations. This process is outlined in the accompanying _Filter_the_data_ file. 
+
+We then had to prepare and combine the data so that we could work with individual databases. This meant preparing the station and weather data and combing with the trip and status data files. This gave us two databases containing all the information for trip and status. This process is outlined in the accompanying _Preparing_station_data_, _Preparing_trip_data_, _Preparing_weather_data_ and _Combine_the_data_ files.
+
+Finally, some of the stations had been physically moved during the year.  This meant that their longitude and latitude had changed at a particular date. This information had to be incorporated to the database. This process is outlined in the accompanying _Update_the_data file. 
+
+
+The result is two databases which we can analyse: _trip_ and _status_
+
+
+```{r}
+glimpse(trip)
+glimpse(status)
+```
+
+
+
+## Preliminary analysis
+
+### System stats
+
+```{r}
+temp <-status  %>% 
+  select(station_id,landmark) %>% 
+  distinct()
+table(temp$landmark)
+```
+
+We see that half of the stations are located in San Francisco,
+```{r}
+table(trip$landmark)
+```
+and over $90$ per cent of the trips took place in San Francisco and we see that 
+
+```{r}
+trip  %>% group_by(landmark)  %>% summarise(trips_per_day =n()/365) 
+```
+in terms of trips per day San Francisco is $10$ times busier than the rest of the system combined
+### Trips
+
+We can look at a summary of the trip duration data:
+```{r}
+trip %>% select(Duration) %>% summary()
+```
+
+We see that the average trip length is $1046/60 = 17.4$ minutes, the minimum trip length was $1$ minute and the max was nearly $200$ days!
+Does this vary by location?
+
+```{r}
+distinct(trip, landmark)
+
+trip %>% filter(landmark == "San Francisco") %>% 
+        select(Duration) %>% 
+        summary()
+trip %>% filter(landmark == "Mountain View") %>% 
+        select(Duration) %>% 
+        summary()
+
+trip %>% filter(landmark == "San Jose") %>% 
+        select(Duration) %>% 
+        summary()
+
+trip %>% filter(landmark == "Palo Alto") %>% 
+        select(Duration) %>% 
+        summary()
+
+trip %>% filter(landmark == "Redwood City") %>% 
+        select(Duration) %>% 
+        summary()
+```
+
+We can look at how the trips are made on a day by day basis
+
+```{r}
+trips_by_day <- trip  %>%  
+  group_by(Date)  %>% 
+  summarise(trips_per_day = n())  %>% 
+  mutate(Weekday = wday(Date,label=TRUE, abbr=FALSE))
+
+ggplot(trips_by_day, aes(x = Date, y = trips_per_day))+
+  geom_line()+
+  geom_smooth(span = 0.3)+
+  labs(x = 'Date', y = 'Trips made per day')
+```
+The interesting large-scale fluctuation is the dip in usage around January. There is also short-scale fluctuations on the week scale. Let's take a look:
+ 
+```{r}
+trips_weekday <- trip  %>%  
+  mutate(Weekday = wday(Date,label=TRUE, abbr=FALSE))
+
+ggplot(trips_weekday, aes(x = Weekday))+
+geom_bar()+
+labs(x = 'Weekday', y = 'Trips')
+```
+ 
+We see that over the year there is a $70$ per cent drop in usage at the weekends. As for the large scale drop we can look at the data by week and look at average temperature
+
+```{r}
+mean_ <- function(...) mean(..., na.rm=T)
+
+trips_week_avg <- trip  %>% mutate(Week = week(Date))  %>% 
+  group_by(Week)  %>% 
+  summarise(trips_per_week = n(), avg_temp = mean_(Mean.TemperatureF)) 
+
+ggplot(trips_week_avg, aes(x = Week, y = trips_per_week, col = avg_temp))+
+  geom_point()+
+  scale_colour_gradient2(low="blue", mid = "orange", high="red", midpoint=60)+
+  labs(x = 'Week', y = 'Trips made', col = "Average Temp F")
+
+```
+There seems to be some evidence to suggest the temperature is correlated with the bike usage.
+
+Let's have a look at how the trips vary by time of day:
+
+```{r}
+trip_per_hour <- trip %>% 
+  mutate(Hour = hour(Start_trip))
+
+ggplot(trip_per_hour, aes(x = Hour))+
+  geom_bar()+
+  labs(x= "Hour", y="Trips")
+```
+
+
+We can see when the peak usage is. How about the length of the trips? We'll firstly cap all trips over $120$ minutes and then draw a histogram of the lengths in minutes.
+
+```{r}
+trip_l <- trip %>% 
+  mutate(Duration = Duration/60) %>% 
+  mutate(Duration = ifelse(Duration >120,120, Duration))
+ggplot(trip_l, aes(x= Duration))+
+  geom_histogram(binwidth = 1)+
+  labs(x= "Trip length (mins)", y = "Trips")
+  
+```
+
+We can take a closer look at some of the really long trips.
+```{r}
+long_trips <- trip  %>%  filter(Duration > 7* 24* 60 * 60)  %>% 
+  select(Start.Station, End.Station, Duration, Date, Subscriber.Type, Bike..)
+
+glimpse(long_trips)
+```
+
+We see there were $8$ trips longer than a week. One of which was a subscriber. Perhaps people don't understand the pricing structure?
+
+### Bike availability
+
+We can use our data to look at many aspects of the bike sharing system and how it functions. We can firstly answer a very simple question without doing anything fancy: Are there ever no bikes available?
+
+```{r}
+min(status$bikes_available)
+```
+
+Yes it happens. But that may not be the full story of course. Is this during operation hours? Is it due to maintenance? We will need to analyse further.
+
+Let's take a look at how bikes available fluctuates on average in some select stations in San Francisco over a particular week.
+
+```{r, echo =FALSE}
+status_sf_select <- status %>% 
+  filter(landmark == "San Francisco") %>% 
+  filter(between(station_id, 50, 60)) %>% 
+  filter(between(Date, as.Date("2015-06-01"), as.Date("2015-06-08")))
+  
+ggplot(status_sf_select, aes(x= time, y = bikes_available, 
+                   col = as.factor(station_id)))+ 
+  geom_smooth()+
+  labs(col = 'station id', x = 'time', y = ' number of bikes available' )
+```
+
+
+Now let's look at the precise fluctuations on a particular day
+
+```{r, echo = FALSE}
+status_sf_select <- status %>% 
+  filter(landmark == "San Francisco") %>% 
+  filter(between(station_id, 50, 60)) %>% 
+  filter(Date == as.Date("2015-06-01"))
+  
+ggplot(status_sf_select, aes(x= time, y = bikes_available, 
+                   col = as.factor(station_id)))+ 
+  geom_line()+
+  geom_point()+
+  labs(col = 'station id', x = 'time', y = ' number of bikes available' )
+```
+
+We see that there are times when the number available goes to zero or is quite low.
+
+### Station popularity.
+
+We can find the most used starting points as a measure of station popularity
+
+```{r, echo = FALSE}
+Count_starting_point <- trip %>% 
+  count(Start.Terminal) %>%  
+  arrange(desc(n))
+
+Terminal_landmark <- trip %>% 
+  select(Start.Terminal, landmark,  start_lat, start_long) %>% 
+  distinct( Start.Terminal, .keep_all = TRUE)
+
+Count_starting_point <-
+left_join(Count_starting_point , Terminal_landmark, by= c("Start.Terminal"= "Start.Terminal"))
+
+ggplot(Count_starting_point, aes(x = reorder(Start.Terminal, -n), y = n,  
+                                 col = as.factor(landmark))) + 
+  geom_point()+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size =1))+
+  labs(col='Area', x = "Starting station id", y = "Times used") 
+
+
+```
+
+
+We can visualise the usage in a particular region like San Francisco
+```{r}
+San_Fran_map <-qmap(
+  location = 'san francisco financial district', 
+  source = "osm", 
+  zoom =14)
+
+San_Fran_map + 
+  geom_point(data =Count_starting_point, 
+             aes( y= start_lat, 
+                  x =start_long, 
+                  size = n), alpha = 0.5)+
+  labs(size = 'Usage')
+```
+
+
+### Trip popularity
+We can visualise the trips in San Francisco to try to get an idea of how the system is used for a particular day
+
+```{r}
+San_Fran_trips <-trip %>% 
+  filter(landmark == "San Francisco") %>%
+  filter(date(Date) == as.Date("2015-06-15")) %>% 
+  select(Start.Station, End.Station, start_lat, start_long,end_lat, end_long) %>% 
+  count(Start.Station, End.Station,start_lat, start_long, end_lat, end_long)
+  
+San_Fran_map <-qmap(location = 'san francisco financial district', zoom =14)
+
+San_Fran_map + 
+  geom_segment(data = San_Fran_trips, 
+               aes(y= start_lat, 
+                   x = start_long, 
+                   yend =  end_lat, 
+                   xend = end_long, 
+                   size = n), alpha = 0.1)+ 
+  theme(legend.position="none")
+  
+```
+
+We start to see how the system is being used from these illustrations.
+
+
+## Future analysis
+
+Now that we have the data prepared and have taken a look at it we can start our proper analysis.
+
+We will need to obtain more temporal data such as how the stations are used on average at a particular time of day. How are they used throughout the week etc. We need to find out how long stations go without having any bikes or docking stations. We need to define some measures of overused and underused stations and find these stations. Performing a graph based analysis will allow us to pick out the important stations. Deriving certain centrality measures will help with this.
+
+We will need to build some predictive models for bike use. This could involve correlating the weather data with bike use so that one can accurately estimate bike use from a weather report.
+
+The data itself will not tell us _why_ a particular station is so popular or not. Obtaining and combing with data about the Bay area such as shops, restaurants, offices will help us answer this question and potentially identify other popular spots.
+
+
+
