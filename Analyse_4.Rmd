@@ -1,0 +1,43 @@
+---
+title: "Analyse_3: Connecting with Carto DB."
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE)
+```
+```{r}
+library("dplyr")
+library("tidyr")
+library("lubridate")
+library("readr")
+library("ggplot2")
+library("ggmap")
+library("igraph")
+library("popgraph")
+library("zipcode")
+trip_read    <- read_csv("trip_full_updated2.csv")
+status_read  <- read_csv("status_full_updated.csv")
+trip         <- dplyr::tbl_df(trip_read)
+status       <- dplyr::tbl_df(status_read)
+```
+
+
+## Introduction
+We're going to visualise the bike data using Cartodb
+
+```{r}
+trip_short <- trip  %>% select(Start_trip, End_trip,start_lat,start_long, end_lat, end_long, Date)  %>% mutate(Date = ymd(Date))  %>% filter(Date == ymd("2015-08-31"))  %>% arrange(Start_trip)
+trip_start <- select(trip_short, Start_trip,start_lat, start_long)
+trip_end <- select(trip_short, End_trip,end_lat, end_long)
+names(trip_start) <- c("Station", "Time", "Latitude", "Longitude")
+names(trip_end) <- c("Time", "Latitude", "Longitude")
+trip_start <- mutate(trip_start, Hire = "Start")
+trip_end <- mutate(trip_end, Hire = "End")
+hires <- full_join(trip_start,trip_end)
+write_csv(hires, "bikeHires.csv")
+```
+
+This data is now ready to be imported into cartodb.

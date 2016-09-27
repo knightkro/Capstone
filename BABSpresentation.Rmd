@@ -1,0 +1,803 @@
+---
+title: "Expansion of a bike share."
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%B, %Y')`"
+output: 
+  ioslides_presentation:
+    widescreen: true
+    logo: BABS_media_page.png 
+    css: myStyle.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+
+```{r}
+library("dplyr")
+library("tidyr")
+library("lubridate")
+library("readr")
+library("ggplot2")
+library("ggmap")
+library("igraph")
+library("popgraph")
+library("zipcode")
+library("pander")
+library("reshape2")
+library("knitr")
+trip_read    <- read_csv("trip_full_updated2.csv")
+status_read  <- read_csv("status_full_updated.csv")
+station      <- read_csv("station_data.csv")
+weather_read <- read_csv("201508_weather_data.csv")
+trip         <- dplyr::tbl_df(trip_read)
+status       <- dplyr::tbl_df(status_read)
+station      <- dplyr::tbl_df(station)
+weather      <- dplyr::tbl_df(weather_read)
+```
+
+
+
+## Bay area bike share
+
+- One year (9/2014 - 9/2015).
+- Five cites (Mountain View, Palo Alto, Redwood City, San Jose, San Francisco).
+- Seventy stations.
+- 354152 bike trips.
+
+<div align="center">
+<img src="bikesharepicture.jpg" width=750 >
+</div>
+
+## How it works
+
+- 24 hour, 3 day or 1 year memberships are available.
+- Bikes can be hired and dropped off at any station.
+- Trips over 30 minutes incur late fees.
+
+<div align="center">
+<img src="bikepath.jpg" width=800 >
+</div>
+
+## People love it!
+- On average over 1200 trips per day are made during the week.
+- Over 360 per day are made on weekends.
+- Usage drops around January. It drops by 30 per cent on rainy days.
+<div class="centered">
+```{r}
+trip_per_day <- trip %>% 
+  group_by(Date) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+  mutate(weekday = wday(Date)) %>% 
+  mutate(weekend = ifelse(weekday == 1 | weekday == 7, "Weekend","Weekday"))
+
+ggplot(trip_per_day, aes(x = Date, y = count))+
+  geom_point(aes(col = as.factor(weekend)), alpha = 0.6)+
+  geom_smooth(aes(col = as.factor(weekend)), span = 0.4, se= FALSE, show.legend = TRUE)+
+  labs(x = "Date", y = "Trips", col = "Day")+
+  scale_color_manual(values = c("blue", "red"))
+
+
+```
+</div>
+
+
+## Trip length
+```{r}
+trip_l <- trip %>% 
+  mutate(Duration = Duration/60)
+
+trip30 <- filter(trip_l, Duration <= 30)
+
+# Calculate distance in kilometers between two points
+earth.dist <- function (long1, lat1, long2, lat2)
+{
+rad <- pi/180
+a1 <- lat1 * rad
+a2 <- long1 * rad
+b1 <- lat2 * rad
+b2 <- long2 * rad
+dlon <- b2 - a2
+dlat <- b1 - a1
+a <- (sin(dlat/2))^2 + cos(a1) * cos(b1) * (sin(dlon/2))^2
+c <- 2 * atan2(sqrt(a), sqrt(1 - a))
+R <- 6378.145
+d <- R * c
+return(d)
+}
+
+trip_dist <- mutate(trip, distance = earth.dist(start_long, start_lat, end_long, end_lat))
+```
+- The average trip length is `r round(mean(trip_l$Duration), digits =2)` minutes, `r round(mean(trip_dist$distance),2) ` km.
+- `r round(100* nrow(trip30) / nrow(trip),1)`% of trips are made within the 30 minute time limit.
+
+<div class="centered">
+```{r}
+trip_l <- trip_l %>% 
+  mutate(Duration = ifelse(Duration >60,60, Duration))
+
+ggplot(trip_l, aes(x= Duration))+
+  geom_histogram(binwidth = 1)+
+  labs(x= "Trip length (mins)", y = "Trips")+
+  scale_x_discrete(limits = seq(0,60,10))+
+  theme(legend.position="none")
+
+```
+</div>
+
+
+## Long trips
+
+- The longest trip made lasted `r round(max(trip$Duration)/ ( 60 * 60 *24))` days! 
+- The largest distance between stations was `r round(max(trip_dist$distance))` km, from San Jose to San Francisco, a trip of more than 8 hours:
+<div class="centered">
+```{r}
+longest_trip <- trip_dist %>% 
+  filter(distance > 60)
+stations2 <- filter(station, name == "MLK Library" | name == "Market at 4th")
+location <- c((longest_trip$start_long + longest_trip$end_long)/ 2.0, (longest_trip$start_lat + longest_trip$end_lat)/ 2.0)
+BABSmap <- get_map(location,maptype ="roadmap", zoom=10)
+ggmap(BABSmap)+geom_segment(data = longest_trip, aes(y= start_lat, x = start_long, yend =  end_lat, xend = end_long),alpha = 1.0)+
+  geom_point(data = stations2, aes(y= lat, x = long), col = "red", size = 2)+ theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+  
+```
+</div>
+
+
+##
+<div class="centered">
+```{r fig.height=6.5, fig.width=8.5}
+station2 <- station %>% 
+  select(station_id, name, landmark) %>% 
+  mutate(landmark = factor(landmark, levels = c("San Jose", "Redwood City", "Mountain View", "Palo Alto", "San Francisco"))) %>% 
+    arrange(landmark)
+
+stationLabels <- station2$name
+stationidsy <- stationLabels
+stationidsx <- abbreviate(stationLabels,3)
+
+trip_numbers <- trip  %>% 
+  group_by(Start.Station, End.Station)  %>% 
+  summarise(trips = n())
+
+myPalette <- c("SeaGreen", "Sienna", "red", "MediumVioletRed", "blue")
+names(myPalette) <- levels(station2$landmark)
+
+ggplot(trip_numbers, aes(y=Start.Station, x=End.Station))+
+    geom_tile(aes(fill = trips))+
+    scale_fill_gradient2(low ="yellow", mid = "grey", high = "black")+theme_bw()+
+  theme(text = element_text(size=7), axis.text.x = element_text(angle=90, vjust=1))+
+  scale_x_discrete(limits=stationLabels, labels = stationidsx)+
+  scale_y_discrete(limits=stationLabels, labels = stationidsy)+
+  labs(x="End station", y= "Start station", fill = "Trips", title = "Heat map of trips")+
+  theme(axis.text.x = element_text(colour=myPalette[station2$landmark]), 
+        axis.text.y = element_text(colour=myPalette[station2$landmark]),
+        plot.title = element_text(size=20))
+
+```
+</div>
+
+## Trip time: Weekday
+-During the week trips are commonly made during commuting hours.
+<div class="centered">
+```{r}
+trip_per_hour <- trip %>% 
+  mutate(Hour = hour(Start_trip))
+
+trip_per_hourWeek <- trip_per_hour %>% filter(Weekday != "Saturday") %>% 
+  filter(Weekday != "Sunday")
+
+ggplot(trip_per_hourWeek, aes(x = Hour))+
+  geom_bar()+
+  labs(x= "Hour", y="Trips")
+```
+</div>
+
+
+## Trip time: Weekend
+-During the weekend trips are taken more... leisurely.
+<div class="centered">
+```{r}
+trip_per_hourWeekend <- filter(trip_per_hour, Weekday == "Saturday" | Weekday == "Sunday")
+
+ggplot(trip_per_hourWeekend, aes(x = Hour))+
+  geom_bar()+
+  labs(x= "Hour", y="Trips")
+```
+</div>
+
+## Typical weekday (Use controls to zoom.)
+
+<iframe width="100%" height="520" frameborder="0" src="https://knightkro.carto.com/viz/82be97f4-7b9c-11e6-b78b-0e3a376473ab/embed_map" allowfullscreen webkitallowfullscreen mozallowfullscreen oallowfullscreen msallowfullscreen></iframe>
+
+##Expansion!
+
+- The bike share is expanding ten-fold to 7000 bikes with new stations.
+- Users can submit suggestions for locations [online](http://suggest.bayareabikeshare.com/page/about). Over 5000 so far:
+
+<div align="center">
+<img src="Screenshot-2016-09-25-23-55-24.png" width=600 >
+</div>
+
+- People are clearly enthusiastic, great! But how to choose?
+
+## Usage data
+- We'll look at the data, analyse usage patterns and suggest locations.
+- The data is available [here](http://www.bayareabikeshare.com/open-data).
+
+<div align="center">
+<img src="cyclist.jpg" width=500 >
+</div>
+
+## Busiest stations
+- We will use a graph ranking algorithm to find the busiest stations.
+- Bike stations are *nodes*, links between nodes represent trips.
+- Weights on the links give the number of trips.
+<div align="center">
+```{r}
+tripNumbers <- trip %>%  
+  group_by(Start.Station,End.Station) %>% 
+  summarise(weight = n())  %>%
+  ungroup() %>% 
+  mutate(weight = (weight - min(weight))/(max(weight)-min(weight)))
+bikeGraph <- graph_from_data_frame(tripNumbers, directed=TRUE) %>% 
+set_vertex_attr("latitude", value = station$lat) %>% 
+set_vertex_attr("longitude", value = station$long) %>% 
+set_vertex_attr("city", value = station$landmark)
+location <- c(-122.3999,37.7946)
+BABSmap <- get_map(location,maptype="roadmap", zoom=14)
+
+bayTrips <-trip %>% 
+  select(Start.Station, End.Station, start_lat, start_long,end_lat, end_long) %>% 
+  count(Start.Station, End.Station,start_lat, start_long, end_lat, end_long)
+
+ggmap(BABSmap)+
+  geom_segment(data = bayTrips, 
+               aes(y= start_lat, 
+                   x = start_long, 
+                   yend =  end_lat, 
+                   xend = end_long), alpha = 0.1)+ 
+  theme(legend.position="none")+
+  geom_nodeset( aes(x=longitude, y=latitude), bikeGraph, size=1, alpha =0.9, col="red")+ theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+</div>
+
+## Eigenvalue centrality
+- Takes into account the number of links made by a node but also their quality (do they connect to busy stations?). 
+- The higher the centrality value the more important the station.
+- We calculated eigenvalue centrality on a city by city basis.
+
+
+<div align="center">
+<img src="babsstat1.jpg" width=550 >
+</div>
+
+## Mountain View
+
+<div align="center">
+```{r}
+tripNumbers <- trip %>%  
+  filter(startLandmark == "Mountain View", endLandmark == "Mountain View") %>% 
+  group_by(Start.Station,End.Station) %>% 
+  summarise(weight = n())  %>%
+  ungroup() %>% 
+  mutate(weight = (weight - min(weight))/(max(weight)-min(weight)))
+
+bikeGraph <- graph_from_data_frame(tripNumbers, directed=TRUE)
+bikeE <- eigen_centrality(bikeGraph, directed = TRUE)
+bikeEigen <- data.frame(station = names(bikeE$vector), eig = bikeE$vector)
+bikeEigen <- dplyr::tbl_df(bikeEigen)
+bikeEigen <- mutate(bikeEigen, station = as.character(station))
+bikeEigen <- arrange(bikeEigen, eig)
+ggplot(bikeEigen, aes(x=station, y = eig))+
+  geom_point()+
+  theme(text = element_text(size=12), axis.text.x = element_text(angle=45, vjust=1, hjust = 0.8))+
+  labs(x="Station", y= "Centrality")+
+  scale_x_discrete(limits = bikeEigen$station)
+```
+</div>
+
+
+
+
+## Palo Alto
+
+<div align="center">
+```{r}
+tripNumbers <- trip %>%  
+  filter(startLandmark == "Palo Alto", endLandmark == "Palo Alto") %>% 
+  group_by(Start.Station,End.Station) %>% 
+  summarise(weight = n())  %>%
+  ungroup() %>% 
+  mutate(weight = (weight - min(weight))/(max(weight)-min(weight)))
+
+bikeGraph <- graph_from_data_frame(tripNumbers, directed=TRUE)
+bikeE <- eigen_centrality(bikeGraph, directed = TRUE)
+bikeEigen <- data.frame(station = names(bikeE$vector), eig = bikeE$vector)
+bikeEigen <- dplyr::tbl_df(bikeEigen)
+bikeEigen <- mutate(bikeEigen, station = as.character(station))
+bikeEigen <- arrange(bikeEigen, eig)
+ggplot(bikeEigen, aes(x=station, y = eig))+
+  geom_point()+
+  theme(text = element_text(size=12), axis.text.x = element_text(angle=45, vjust=1, hjust = 0.6))+
+  labs(x="Station", y= "Centrality")+
+  scale_x_discrete(limits = bikeEigen$station)
+```
+</div>
+
+
+
+
+## Redwood City
+
+<div align="center">
+```{r}
+
+tripNumbers <- trip %>%  
+  filter(startLandmark == "Redwood City", endLandmark == "Redwood City") %>% 
+  group_by(Start.Station,End.Station) %>% 
+  summarise(weight = n())  %>%
+  ungroup() %>% 
+  mutate(weight = (weight - min(weight))/(max(weight)-min(weight)))
+
+bikeGraph <- graph_from_data_frame(tripNumbers, directed=TRUE)
+bikeE <- eigen_centrality(bikeGraph, directed = TRUE)
+bikeEigen <- data.frame(station = names(bikeE$vector), eig = bikeE$vector)
+bikeEigen <- dplyr::tbl_df(bikeEigen)
+bikeEigen <- mutate(bikeEigen, station = as.character(station))
+bikeEigen <- arrange(bikeEigen, eig)
+ggplot(bikeEigen, aes(x=station, y = eig))+
+  geom_point()+
+  theme(text = element_text(size=12), axis.text.x = element_text(angle=45, vjust=1,hjust = 0.6))+
+  labs(x="Station", y= "Centrality")+
+  scale_x_discrete(limits = bikeEigen$station)
+```
+</div>
+
+
+
+
+
+
+
+## San Francisco
+
+
+<div align="center">
+```{r}
+tripNumbers <- trip %>%  
+  filter(startLandmark == "San Francisco", endLandmark == "San Francisco") %>% 
+  group_by(Start.Station,End.Station) %>% 
+  summarise(weight = n())  %>%
+  ungroup() %>% 
+  mutate(weight = (weight - min(weight))/(max(weight)-min(weight)))
+
+bikeGraph <- graph_from_data_frame(tripNumbers, directed=TRUE)
+bikeE <- eigen_centrality(bikeGraph, directed = TRUE)
+bikeEigen <- data.frame(station = names(bikeE$vector), eig = bikeE$vector)
+bikeEigen <- dplyr::tbl_df(bikeEigen)
+bikeEigen <- mutate(bikeEigen, station = as.character(station))
+bikeEigen <- arrange(bikeEigen, eig)
+ggplot(bikeEigen, aes(x=station, y = eig))+
+  geom_point()+
+  theme(text = element_text(size=8), axis.text.x = element_text(angle=45, vjust=1, hjust = 0.9))+
+  labs(x="Station", y= "Centrality")+
+  scale_x_discrete(limits = bikeEigen$station)
+```
+</div>
+
+
+
+## San Jose
+
+
+
+<div align="center">
+```{r}
+tripNumbers <- trip %>%  
+  filter(startLandmark == "San Jose", endLandmark == "San Jose") %>% 
+  group_by(Start.Station,End.Station) %>% 
+  summarise(weight = n())  %>%
+  ungroup() %>% 
+  mutate(weight = (weight - min(weight))/(max(weight)-min(weight)))
+
+bikeGraph <- graph_from_data_frame(tripNumbers, directed=TRUE)
+bikeE <- eigen_centrality(bikeGraph, directed = TRUE)
+bikeEigen <- data.frame(station = names(bikeE$vector), eig = bikeE$vector)
+bikeEigen <- dplyr::tbl_df(bikeEigen)
+bikeEigen <- mutate(bikeEigen, station = as.character(station))
+bikeEigen <- arrange(bikeEigen, eig)
+ggplot(bikeEigen, aes(x=station, y = eig))+
+  geom_point()+
+  theme(text = element_text(size=8), axis.text.x = element_text(angle=45, vjust=1, hjust = 0.8))+
+  labs(x="Station", y= "Centrality")+
+  scale_x_discrete(limits = bikeEigen$station)
+```
+</div>
+
+
+## Number 1 in each city:
+
+> - **Mountain View**: *Mountain View Caltrain station*.
+> - **Palo Alto**: *Palo Alto Caltrain station*.
+> - **Redwood City**: *Redwood City Caltrain station*.
+> - **San Francisco**: *San Francisco Caltrain (Townsend at 4th)*.
+> - **San Jose**: *San Jose Diridon Caltrain station*.
+
+
+## Caltrain stations
+- We see that the busiest locations in each city are at the Caltrain stations.
+<div align="center">
+<img src="train.jpg" width=650 >
+</div>
+
+## San Francisco Caltrain
+
+```{r}
+SFCT <- trip %>% 
+  filter(Start.Station == "San Francisco Caltrain 2 (330 Townsend)" | Start.Station == "San Francisco Caltrain (Townsend at 4th)") %>% group_by(Subscriber.Type) %>% summarise(count = n())
+```
+- `r round( 100 *SFCT$count[2] / sum(SFCT$count))` per cent of usage here is subscribers. There are two stations.
+- Bikes are picked up in the morning, dropped off in the evening by commuters.
+<div align="center">
+```{r}
+
+trip_per_hour_start <- trip %>% 
+  filter(Start.Station == "San Francisco Caltrain 2 (330 Townsend)" | Start.Station == "San Francisco Caltrain (Townsend at 4th)") %>% 
+  mutate(sHour = hour(Start_trip))
+
+trip_per_hour_end <- trip %>% 
+  filter(End.Station == "San Francisco Caltrain 2 (330 Townsend)" | End.Station == "San Francisco Caltrain (Townsend at 4th)") %>% 
+  mutate(eHour = hour(End_trip))
+
+ggplot(trip_per_hour_start, aes(x = sHour))+
+geom_bar(col = 'grey', fill = "green", alpha = 0.8, 
+         width = 0.5, position = position_nudge(x = 0.25))+
+geom_bar(data = trip_per_hour_end, aes(x=eHour), 
+         col = 'grey', fill = "red", alpha = 0.8, width = 0.5,
+         position = position_nudge(x = 0.75))+
+labs(x= "Hour", y="Trips", title = "Start(Green) and End(Red) at SF Caltrain")+
+  scale_x_continuous(breaks =seq(0,24,1))
+      
+
+```
+
+</div>
+## Zip codes of commuters to SF Caltrain
+
+```{r fig.height=6}
+data("zipcode")
+zips <- trip %>% 
+  filter(Start.Station == "San Francisco Caltrain 2 (330 Townsend)" | Start.Station == "San Francisco Caltrain (Townsend at 4th)"| End.Station == "San Francisco Caltrain 2 (330 Townsend)" | End.Station == "San Francisco Caltrain (Townsend at 4th)") %>% 
+  group_by(Zip.Code) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+  mutate(zip = clean.zipcodes(Zip.Code)) %>% 
+  merge(zipcode, by.x='zip', by.y='zip') %>% 
+  arrange(desc(count))
+tp <- 80
+zipsShort <- slice(zips, 1:tp)
+```
+
+- People travel from all over (`r  length(zips$zip)` zip codes). Top `r tp` account for `r round( 100 * sum(slice(zips, 1:tp)$count) / sum(zips$count) )` per cent:
+
+
+
+<div align="center">
+```{r}
+location <- c( mean(zipsShort$longitude), mean(zipsShort$latitude))
+BABSmap <- get_map(location,maptype="roadmap", zoom=10)
+ggmap(BABSmap)+
+  geom_point(data = zipsShort, aes(x=longitude, y=latitude, size = count), alpha = 0.5)+
+  labs(x = "longitude", y = "latitude", size = "Count",
+       title = "Zip codes of users at SF Caltrain station.")+scale_size_area()+ theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+</div>
+
+
+
+## Expansion
+```{r}
+zipsNorth <- trip %>% 
+  group_by(Zip.Code) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+  mutate(zip = clean.zipcodes(Zip.Code)) %>% 
+  merge(zipcode, by.x='zip', by.y='zip') %>% 
+  filter(state == "CA") %>% 
+  filter(city == "Oakland"| city == "Berkeley"| city == "Emeryville"| city =="Alameda") %>% 
+  arrange(desc(count))
+```
+
+- Part of the [planned expansion](http://www.bayareabikeshare.com/expansion) of the system is to have stations in Oakland, Emeryville and Berkeley.
+- Integrating with the [Bay area rapid transit](http://www.bart.gov/) stations and other public transport will encourage commuters to use the bikes.
+
+<div align="center">
+<img src="bart.jpg" width=400 >
+</div>
+
+## Expansion
+- There are already `r sum(zipsNorth$count)` trips made from users who live here.
+
+<div align="center">
+```{r fig.height=5}
+location <- c( mean(zipsNorth$longitude), mean(zipsNorth$latitude))
+BABSmap <- get_map(location,maptype="roadmap", zoom=12)
+ggmap(BABSmap)+
+  geom_point(data = zipsNorth, aes(x=longitude, y=latitude, size = count), alpha = 0.5)+
+  labs(x = "longitude", y = "latitude", size = "Count",
+       title = "Zip codes of BABS users.")+
+          scale_size_area()+ 
+          theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+</div>
+
+
+## SF open data
+- The City and County of San Francisco has measured bicycle usage.
+- They have records going back to 2006 at various locations around the city.
+- The data is available [here](https://data.sfgov.org/).
+- We'll take a look to see if we can get an idea of where bicycles are being used.
+
+<div align="center">
+<img src="cityhall.jpg" width=500 >
+</div>
+
+## Bike usage has generally increased
+
+<div align="center">
+```{r}
+bikeCounts <-read_csv("Bike_Volume_Manual_Counts.csv")
+bikeCount15 <-read.csv("2015bikecount.txt", sep = " ")
+bikeCounts <- dplyr::tbl_df(bikeCounts)
+bikeCount15 <- dplyr::tbl_df(bikeCount15)
+
+names(bikeCounts) <- make.names(names(bikeCounts), unique=TRUE)
+names(bikeCount15) <- c("ID","Locations","X2014","Bike.Count.2015.Afternoon"  )
+
+bikeCounts <- arrange(bikeCounts, Location.ID)
+bikeCount15 <- arrange(bikeCount15, ID)
+bikeCounts <-left_join(bikeCounts, bikeCount15, by = c("Location.ID" = "ID"))
+
+bikeCounts <- bikeCounts %>% 
+  separate(Geom, c("latitude", "longitude"), sep = ", ") %>% 
+  mutate(latitude = 
+           as.numeric(gsub("\\(|\\)", "",latitude)),
+         longitude = 
+           as.numeric(gsub("\\(|\\)", "",longitude)))
+names(bikeCounts) <- make.names(names(bikeCounts), unique=TRUE)
+bikeCounts <- select(bikeCounts,c(2,3,5,6,7,8,9,10,11,12,22,18,19))
+bikeCounts <- bikeCounts %>%
+  mutate(Bike.Count.2006.Afternoon = 
+           ifelse(Bike.Count.2006.Afternoon<0, NA,Bike.Count.2006.Afternoon)) %>% 
+  mutate(Bike.Count.2007.Afternoon = 
+           ifelse(Bike.Count.2007.Afternoon<0, NA,Bike.Count.2007.Afternoon)) %>%
+  mutate(Bike.Count.2008.Afternoon = 
+           ifelse(Bike.Count.2008.Afternoon<0, NA,Bike.Count.2008.Afternoon)) %>% 
+  mutate(Bike.Count.2009.Afternoon = 
+           ifelse(Bike.Count.2009.Afternoon<0, NA,Bike.Count.2009.Afternoon)) %>% 
+  mutate(Bike.Count.2010.Afternoon = 
+           ifelse(Bike.Count.2010.Afternoon<0, NA,Bike.Count.2010.Afternoon)) %>%
+  mutate(Bike.Count.2011.Afternoon = 
+           ifelse(Bike.Count.2011.Afternoon<0, NA,Bike.Count.2011.Afternoon)) %>% 
+  mutate(Bike.Count.2013.Afternoon = 
+           ifelse(Bike.Count.2013.Afternoon<0, NA,Bike.Count.2013.Afternoon)) %>%
+  mutate(Bike.Count.2014.Afternoon = 
+           ifelse(Bike.Count.2014.Afternoon<0, NA,Bike.Count.2014.Afternoon))  
+
+bikeCountsNew <- bikeCounts %>%  
+  gather(Year, value, 3:11 ) %>%
+  mutate(Year = extract_numeric(gsub("\\.", "",Year)))
+
+ggplot(bikeCountsNew, aes(x=Year, y = value, col = Location))+
+  geom_point()+
+  geom_line()+
+  theme(legend.position="none")+
+  labs(x="Year", y= "Bike usage", title = "Bike usage from various locations in SF") +
+  scale_x_discrete(limits = unique(bikeCountsNew$Year))+
+  theme(axis.text.x = element_text(hjust = 0.8))
+
+```
+</div>
+
+
+## Visualise where cycling is popular
+
+<div align="center">
+```{r fig.height=5.5}
+location <- c( mean(bikeCountsNew$longitude, na.rm = TRUE), 
+               mean(bikeCountsNew$latitude,na.rm = TRUE))
+BABSmap <- get_map(location,maptype ="roadmap", zoom=13)
+
+ggmap(BABSmap)+
+  geom_point(data = filter(bikeCountsNew, Year == 2015),
+             aes(x=longitude, y=latitude, size = value), alpha = 0.5)+
+  labs(size ="Count", title = "Manual bike count stats 2015 (BABS stations in red).")+scale_size_area()+
+  geom_point(data = station, aes(x=long, y=lat), size =2,col = "red", alpha = 0.5)+
+          theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+</div>
+
+
+
+## High usage
+
+- Cycling common in Marina District, Lower Haight and Mission District.
+- The Golden gate bridge is popular too. According to [San Francisco wikitravel](http://wikitravel.org/en/San_Francisco): 
+ *A very popular ride for visitors to San Francisco is the ride across the Golden Gate Bridge to Sausalito.*
+<div align="center">
+<img src="babsuse1.jpg" width=450 >
+</div>
+
+
+## Recreation
+- Also note recreational areas like the park are also popular.
+- [TripAdvisor](https://www.tripadvisor.co.uk/Attractions-g60713-Activities-San_Francisco_California.html#MAPVIEW) will give us the tourist hotspots:
+
+<div align="center">
+<img src="Screenshot2016-09-2709.10.13.png" width=600 >
+</div>
+
+- We see many are not catered for by BABS. Expansion into these areas may encourage more leisure, weekend use.
+
+## Imbalance
+
+- If more cycles are hired than deposited from a station then the station will require manual re-stocking. 
+- If less cycles are hired than deposited the station fills up and depositing a bike can be frustrating.
+
+<div align="center">
+<img src="pa.jpg" width=400 >
+</div>
+
+
+## Availability at S.F. Caltrain (Townsend at 4th)
+
+- We see that during peak hours it can be a problem.
+
+
+<div align="center">
+
+
+```{r fig.width=10, fig.height=5}
+hires <- trip  %>% 
+  group_by(Start.Station) %>% 
+  summarise(meanHires = round(n()/365))
+deposits <- trip %>% 
+  group_by(End.Station) %>% 
+  summarise(meanDeposits = round(n()/365))
+
+inOut <- left_join(hires, deposits, by = c("Start.Station" = "End.Station"))
+inOut <- inOut %>% 
+  mutate(diff = meanDeposits-meanHires) %>% 
+  mutate(absDiff = abs(diff), loss = ifelse(diff > 0 , "+", ifelse(diff< 0, "-", 0))) %>% 
+  arrange(desc(absDiff))
+names(inOut) <- c("Station", "meanHires","meanDeposits","diff","absDiff", "difference")  
+inOut <- left_join(inOut, station, by = c("Station" = "name"))
+
+inOutSF <- filter(inOut, landmark == "San Francisco")
+
+skewedStations <- slice(inOut,1:1)
+status_sf_select <- status %>% 
+  filter(name  %in% skewedStations$Station) %>% 
+  filter(between(Date, as.Date("2015-08-24"), as.Date("2015-08-24"))) %>% 
+  select(time, bikes_available, docks_available)
+names(status_sf_select) <- c("Time", "Bikes", "Docks")
+stat_long <-  melt(status_sf_select, id="Time") 
+ggplot(stat_long, aes(x=Time, y=value, colour=variable))+geom_step(size=1)+
+  labs(x= "Time", y= "Availability", colour ="")
+```
+
+</div>
+
+
+
+## Daily imbalance 
+- We calculate the daily average deposits minus hires at each station:
+
+<div align="center">
+
+```{r}
+
+ggplot(inOut, aes(x = Station, y = diff, col = as.factor(difference)))+
+  geom_point()+
+  geom_segment(aes(x=Station, xend = Station,y=0, yend = diff), size = 2)+
+  theme(text = element_text(size=8), legend.position="none", axis.text.x = element_text(angle=90, vjust=0,hjust = 0.6))+
+  labs(x="Station", y= "Bikes deposoted -bike hired")+
+  scale_x_discrete(limits = inOut$Station)
+
+
+```
+
+</div>
+
+
+
+## Imbalance in San Francisco
+<div align="center">
+
+```{r fig.height=5.5}
+location <- c( mean(inOutSF$long), mean(inOutSF$lat))
+BABSmap <- get_map(location,maptype ="roadmap", zoom=14)
+
+ggmap(BABSmap)+
+  geom_point(data = inOutSF, 
+             aes(x=long, y=lat, size = absDiff, col = as.factor(difference)))+
+  labs(x = "longitude", y = "latitude", 
+       size ="Imbalance",col ="Skew",title = "Bike imbalance")+
+          theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+
+</div>
+
+
+## Increasing the size of these stations will help alleviate system disruption: 
+
+```{r}
+inOutShort <-slice(inOut,1:5)
+inOutShort <- select(inOutShort,Station, diff)
+names(inOutShort)<- c("Station", "Mean daily imbalance")
+kable(inOutShort)
+```
+
+##
+```{r}
+inOutShort <-slice(inOut,6:10)
+inOutShort <- select(inOutShort,Station, diff)
+names(inOutShort)<- c("Station", "Mean daily imbalance")
+kable(inOutShort)
+```
+
+
+
+## Conclusion and recommendations
+- The BABS system is popular with commuters.
+- Peak usage is during typical commuting hours.
+- Usage drops on rainy days and holidays.
+- The busiest stations are located at transport hubs like Caltrain stations.
+- Expansion to new cities should be along existing public transport infrastructure.
+- Within San Francisco cycling is already popular in Marina District, along the 101, in Lower Haight and Mission District. Bike stations here will be welcome.
+- Increasing the size of the most imbalanced stations will help mitigate any disruption to users caused by lack of space or bikes.
+
+
+## Conclusion and recommendations
+- Recreational areas like the parks are currently popular with cyclists but not catered for by BABS. Bike stations in these locations will promote the BABS as a leisure activity.
+- Promotion to tourists as a travel option would help too: There is currently no mention of BABS on [San Francisco wikitravel](http://wikitravel.org/en/San_Francisco)  or [Bay area wikitravel](http://wikitravel.org/en/Bay_Area_(California)).
+- There is  some confusion about how the system works, some users don't seem to understand the 30 minute rule (or don't care!).
+
+## Happy cycling!
+
+<div align="center">
+<img src="sf-bikes.jpg" width=600 >
+</div>

@@ -1,0 +1,134 @@
+---
+title: "Analyse_2"
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library("dplyr")
+library("tidyr")
+library("lubridate")
+library("readr")
+library("ggplot2")
+library("ggmap")
+trip_read    <- read_csv("trip_full_updated.csv")
+status_read  <- read_csv("status_full_updated.csv")
+trip         <- dplyr::tbl_df(trip_read)
+status       <- dplyr::tbl_df(status_read)
+
+glimpse(trip)
+glimpse(status)
+```
+
+Let's have a look at how the trips vary by time of day:
+
+```{r}
+trip_per_hour <- trip %>% 
+  mutate(Hour = hour(Start_trip))
+
+ggplot(trip_per_hour, aes(x = Hour))+
+  geom_bar()+
+  labs(x= "Hour", y="Trips")
+```
+
+
+How about the length of the trip
+
+```{r}
+trip_l <- trip %>% 
+  mutate(Duration = Duration/60) %>% 
+  mutate(Duration = ifelse(Duration >60,60, Duration))
+ggplot(trip_l, aes(x= Duration))+
+  geom_histogram(binwidth = 1)+
+  labs(x= "Trip length (mins)", y = "Trips")
+  
+
+trip  %>%  filter(Duration > 7* 24* 60 * 60)  %>% 
+  select(Start.Station, End.Station, Duration, Date, Subscriber.Type, Bike..)
+
+```
+
+Let's plot a heat map of all the trips made. 
+
+```{r}
+station <-read_csv("201508_station_data.csv")
+station <- dplyr::tbl_df(station)
+station <- station %>% 
+  select(station_id, name, landmark) %>% 
+  mutate(landmark = factor(landmark, levels = c("San Jose", "Redwood City", "Mountain View", "Palo Alto", "San Francisco"))) %>% 
+    arrange(landmark)
+
+stationLabels <- station$name
+stationLabels[39] = "Washington at Kearny"
+stationLabels[40] = "Post at Kearny"
+stationidsy <- abbreviate(stationLabels,20)
+stationidsx <- abbreviate(stationLabels,3)
+
+trip_numbers <- trip  %>% 
+  group_by(Start.Station, End.Station)  %>% 
+  summarise(trips = n())
+
+# We'll colour the axis labels by region
+myPalette <- c("SeaGreen", "Sienna", "Plum", "MediumVioletRed", "Grey")
+names(myPalette) <- levels(station$landmark)
+
+
+
+ggplot(trip_numbers, aes(y=Start.Station, x=End.Station))+
+    geom_tile(aes(fill = trips))+
+    scale_fill_gradient2(low ="PowderBlue",mid = "SteelBlue", high = "Navy")+
+  theme(text = element_text(size=6), axis.text.x = element_text(angle=90, vjust=1))+
+  scale_x_discrete(limits=stationLabels, labels = stationidsx)+
+  scale_y_discrete(limits=stationLabels, labels = stationidsy)+
+  labs(x="End station", y= "Start station", fill = "Trips", title = "San Jose, Redwood City, Mountain View, Palo Alto, San Francisco")+
+  theme(axis.text.x = element_text(colour=myPalette[station$landmark]), 
+        axis.text.y = element_text(colour=myPalette[station$landmark]))
+
+```
+
+
+
+
+Second way to do it. We'll rewrite the station ids so they match areas
+
+
+```{r}
+station <-read_csv("201508_station_data.csv")
+station <- dplyr::tbl_df(station)
+station <- station %>% 
+  select(station_id, landmark) %>% 
+  arrange(landmark) %>% 
+  mutate(myStationCode = c(1:70))
+
+trip <- trip %>% 
+  select(-landmark) %>% 
+  left_join(station, by = c("Start.Terminal"= "station_id")) %>% 
+  rename(StartStationCode= myStationCode, startLandmark =landmark) %>% 
+  left_join(station, by = c("End.Terminal"= "station_id")) %>%
+  rename(EndStationCode= myStationCode, endLandmark = landmark)
+
+status <- left_join(status, station)
+
+#write_csv(trip,   file="trip_full_updated2.csv")
+#write_csv(status, file="status_full_updated2.csv")
+```
+
+myStationCode 1-7 are in Mountain view, 8-12 are in Palo Alto, 13-19 are in Redwood City, 20-54 are in San Francisco and 55-70 are in San Jose. 
+
+We can now draw a heatmap
+```{r}
+trip_numbers <- trip  %>% 
+  group_by(StartStationCode, EndStationCode)  %>% 
+  summarise(trips = n())
+
+ggplot(trip_numbers, aes(x=StartStationCode, y =EndStationCode))+
+  geom_tile(aes(fill = trips))+
+  scale_fill_gradient(low = "yellow",high = "red")
+```
+
+
+

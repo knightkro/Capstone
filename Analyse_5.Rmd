@@ -1,0 +1,153 @@
+---
+title: "Analyse_5: Predictive models."
+author: "Georgie Knight"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE)
+```
+```{r}
+library("dplyr")
+library("tidyr")
+library("lubridate")
+library("readr")
+library("ggplot2")
+library("ggmap")
+library("igraph")
+library("popgraph")
+library("zipcode")
+trip_read    <- read_csv("trip_full_updated2.csv")
+status_read  <- read_csv("status_full_updated.csv")
+weather_read <- read_csv("201508_weather_data.csv")
+trip         <- dplyr::tbl_df(trip_read)
+status       <- dplyr::tbl_df(status_read)
+weather       <- dplyr::tbl_df(weather_read)
+```
+
+
+## Introduction
+Let's try to create some predictive models. Let's first take a look at the trips per day during the week as we know that usage drops 70% on the weekends. Furthermore we'll concentrate on San Francisco.
+
+```{r}
+trip_by_day <- trip  %>%  
+  filter(startLandmark == "San Francisco", 
+         endLandmark == "San Francisco")  %>% 
+  group_by(Date, Weekday, Events, Mean.TemperatureF)  %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+  replace_na(list(Events = "None")) %>% 
+  mutate(Events = as.factor(Events))
+
+ggplot(trip_by_day, aes(x= Date, y = count, col = Events))+
+   geom_point()+
+   labs(x = "Date", y = "Trips", col = "Weather event", 
+        title = "Weekday bike trips in San Francisco")+ 
+   scale_color_manual(values=c("grey", "purple" ,"yellow", "blue", "black"))
+```
+
+We can look at it in terms of mean temperature
+```{r}
+ggplot(trip_by_day, aes(x= Mean.TemperatureF, y = count, col = Events))+
+     geom_point()+
+     labs(x = "Mean Temperature (F)", y = "Trips", col = "Weather event", 
+          title = "Weekday bike trips in San Francisco")+ 
+     scale_color_manual(values=c("grey", "purple" ,"yellow", "blue", "black"))
+```
+
+We see  the general drop in usage around January, also some intersting outliers. These could be holidays. We perhaps need more specific weather information to analyse its affect on bike usage.
+
+```{r}
+weatherSF <- weather %>% 
+  filter(Zip == 94107) %>% 
+  mutate( Date = as.Date(PDT, "%m/%d/%Y")) %>% 
+  select(Date, `Mean TemperatureF`, Events, PrecipitationIn) %>% 
+  mutate(PrecipitationIn = as.numeric(PrecipitationIn)) %>% 
+  replace_na(list(Events = "None", PrecipitationIn = 0.001)) %>% 
+  mutate(Date = ymd(Date))
+
+trip_by_day$Rain <-weatherSF$PrecipitationIn
+
+ggplot(trip_by_day, aes(x= Rain, y = count, col = Events))+
+     geom_point()+
+     labs(x = "Rainfall (Inches)", y = "Trips", col = "Weather event", 
+          title = "Bike trips in San Francisco")+ 
+     scale_color_manual(values=c("grey", "purple" ,"yellow", "blue", "black"))
+
+trip_weekday <- filter(trip_by_day, Weekday != "Saturday" & Weekday != "Sunday")
+
+ggplot(trip_weekday, aes(x= Rain, y = count, col = Events))+
+     geom_point()+
+     labs(x = "Rainfall (Inches)", y = "Trips", col = "Weather event", 
+          title = "Weekday bike trips in San Francisco")+ 
+     scale_color_manual(values=c("grey", "purple" ,"yellow", "blue", "black"))+
+     stat_smooth(method = "lm", col = "red")
+
+trip_weekday %>% group_by(Events) %>% 
+  summarise(mean_trips = mean(count))
+
+filter(trip_weekday, Events == "Rain-Thunderstorm")
+```
+Let's look at this in terms of rained or not:
+
+```{r}
+trip_weekday %>% mutate(Rained = ifelse(Rain >0.01, "Rain","No Rain")) %>% 
+  group_by(Rained) %>% summarise(mean_trips = mean(count))
+```
+
+So when there is less than 0.01 inches of rain there are an average of 1132.28 trips per day, whilst when it rains there are 776, a drop of over 30 per cent. Is the mean of our 22 observations out of 261 statistically significant? We'll calculate the probability that a mean of 776 or less is found from a random sample of 22 observations
+
+```{r eval = FALSE}
+set.seed(100)
+samples < 10000000
+sum <- 0
+for (i in 1:samples) {
+  sampleMean <- mean(sample_n(trip_weekday, 22)$count)
+  if(sampleMean <= 776){
+    sum <- sum + 1
+    } 
+}
+print(sum/samples)
+```
+Running the above code gives a p-value of around 0.0000001, highly significant.
+
+Let's look at some models
+```{r}
+linear_model <- lm(count ~ Rain + Mean.TemperatureF, data = trip_weekday)
+summary(linear_model)
+```
+
+```{r}
+exponential_model <- lm(log(count) ~ Rain + Mean.TemperatureF, data = trip_weekday)
+summary(exponential_model)
+```
+
+
+
+
+```{r}
+SFDayTrips <- trip  %>% filter(Weekday != "saturday", Weekday != "sunday", startLandmark =="San Francisco", endLandmark== "San Francisco")  %>%  
+  group_by(Date, Start.Station)  %>% 
+  summarise(count =n()) %>% 
+  ungroup() %>% 
+  mutate(Date = as.Date(Date)) %>% 
+  left_join(weatherSF, by =c("Date" = "Date")) 
+ 
+ggplot(SFDayTrips, aes(x= PrecipitationIn, y = count, col = as.factor(Start.Station)))+
+   geom_point()+
+   labs(x = "Rainfall (Inches)", y = "Trips", col = "Weather event", 
+          title = "Weekday bike trips in San Francisco")+
+     stat_smooth(method = "lm", se =FALSE) + theme(legend.position="none")
+```
+
+Which gives us a linear model for each station, we can normalise the number of trips and at each stationlook at the trend
+```{r}
+SFDayTripsNorm <- SFDayTrips %>% 
+  group_by(Start.Station) %>% 
+  mutate(trip_taken = scale(count)) %>% 
+  ungroup()
+plot(y=SFDayTripsNorm$trip_taken, x=SFDayTripsNorm$PrecipitationIn)
+
+```
+

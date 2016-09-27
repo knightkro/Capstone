@@ -1,8 +1,10 @@
 ---
 title: "Analysing the BABS data"
 author: "Georgie Knight"
-date: 20/08/2016
-output: pdf_document
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document: 
+    fig_caption: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -28,6 +30,15 @@ glimpse(status)
 
 
 So now we have our data ready we can play with it.
+
+```{r}
+
+```
+
+
+
+
+
 
 ```{r}
 trip %>% select(Duration) %>% summary()
@@ -165,4 +176,14 @@ ggplot(status_sf_select, aes(x= time, y = bikes_available,
   geom_line()+
   geom_point()+
   labs(col = 'station id', x = 'time', y = ' number of bikes available' )
+```
+
+
+We'll convert the date to a time column within the lubridate package and create a weekday column too. This will help with analysis.
+
+```{r}
+trip <- trip  %>% mutate(
+    Date = parse_date_time(Date,"%Y/%m/%d"),
+    Weekday = wday(Date, label=TRUE, abbr=FALSE)
+                         )
 ```
